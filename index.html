@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Leaflet 2.0 Map with Color & Radius</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  
+  <!-- Leaflet 2.0.0-beta.3 CSS -->
+   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" integrity="sha512-h9FcoyWjHcOcmEVkxOfTLnmZFWIH0iZhZT1H2TbOq55xssQGEJHEaIm+PgoUaZbRvQTNTluNOEfb1ZRy6D3BOw==" crossorigin="anonymous" referrerpolicy="no-referrer">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js" integrity="sha512-BwHfrr4c9kmRkLw6iXFdzcdWV/PGkVgiIyIWLLlTSXzWQzxuSg4DiQUCpauz/EWjgk5TYQqX/kvn9pG1NpYfqg==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+  
+  
+  <style>
+    html, body, #map {
+      height: 100%;
+      width: 100%;
+      margin: 0;
+      padding: 0;
+    }
+    #info-banner {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      z-index: 1000;
+      background: rgba(255, 255, 255, 0.9);
+      padding: 8px 12px;
+      border-radius: 6px;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.2);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      font-size: 13px;
+      color: #333;
+    }
+    .custom-pin {
+      background: transparent;
+      border: none;
+    }
+  </style>
+</head>
+<body>
+
+  <div id="info-banner">Loading points...</div>
+  <div id="map"></div>
+
+
+
+  <script>
+    // 1. Initialize map
+    const map = new L.Map('map').setView(new L.LatLng(22.2819, 114.1589), 13);
+
+    // CartoDB Voyager tiles (works on both file:// and GitHub Pages)
+    new L.TileLayer('https://{s}://{z}/{x}/{y}{r}.png', {
+      maxZoom: 19,
+      attribution: '&copy; OpenStreetMap contributors &copy; CARTO'
+    }).addTo(map);
+
+    function escapeHTML(str) {
+      const div = document.createElement('div');
+      div.textContent = str;
+      return div.innerHTML;
+    }
+
+    function parseColor(rawColor) {
+      if (!rawColor) return '#3388ff';
+      const cleaned = rawColor.trim();
+      const candidate = /^[0-9a-fA-F]{3}$|^[0-9a-fA-F]{6}$/.test(cleaned) 
+        ? `#${cleaned}` 
+        : cleaned;
+      
+      const testEl = new Option().style;
+      testEl.color = candidate;
+      return testEl.color !== '' ? candidate : '#3388ff';
+    }
+
+    // Create a clean colored SVG map pin using DivIcon
+    function createColoredIcon(color) {
+      const svgPin = `
+        <svg xmlns="http://w3.org" viewBox="0 0 24 36" width="28" height="42">
+          <path d="M12 0C5.4 0 0 5.4 0 12c0 9 12 24 12 24s12-15 12-24c0-6.6-5.4-12-12-12z" 
+                fill="${color}" stroke="#ffffff" stroke-width="1.5"/>
+          <circle cx="12" cy="12" r="4.5" fill="#ffffff"/>
+        </svg>`;
+      
+      return new L.DivIcon({
+        html: svgPin,
+        className: 'custom-pin',
+        iconSize: new L.Point(28, 42),
+        iconAnchor: new L.Point(14, 42),
+        popupAnchor: new L.Point(0, -38)
+      });
+    }
+
+    function renderPoints() {
+      if (window.markerLayer) {
+        map.removeLayer(window.markerLayer);
+      }
+      window.markerLayer = new L.LayerGroup().addTo(map);
+
+      const rawHash = window.location.hash.substring(1);
+      const rawSearch = window.location.search.substring(1);
+      const paramString = rawHash.includes('p=') ? rawHash : rawSearch;
+      const params = new URLSearchParams(paramString);
+      
+      const points = params.getAll('p');
+      const allBounds = new L.LatLngBounds();
+      let validCount = 0;
+
+      points.forEach((entry, index) => {
+        // Format: lat,lng,radius,color,label
+        const parts = entry.split(',');
+        if (parts.length >= 2) {
+          const lat = parseFloat((parts.at(0) || '').trim());
+          const lng = parseFloat((parts.at(1) || '').trim());
+          
+          // 3rd field: radius in meters
+          const radiusVal = parts.at(2) !== undefined ? parseFloat(parts.at(2).trim()) : 0;
+          const radius = !isNaN(radiusVal) && radiusVal > 0 ? radiusVal : 0;
+
+          // 4th field: color
+          const color = parseColor(parts.at(3));
+
+          // 5th+ field: label
+          const rawLabel = parts.slice(4).join(',').trim();
+          const label = rawLabel ? escapeHTML(rawLabel) : `Point ${index + 1}`;
+
+          if (!isNaN(lat) && !isNaN(lng) && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180) {
+            const pointLatLng = new L.LatLng(lat, lng);
+            const radiusText = radius > 0 ? `<br>Radius: ${radius}m` : '';
+            
+            // Add colored SVG pin marker
+            new L.Marker(pointLatLng, { icon: createColoredIcon(color) })
+              .bindPopup(`<b>${label}</b>${radiusText}<br><small>${lat.toFixed(5)}, ${lng.toFixed(5)}</small>`)
+              .addTo(window.markerLayer);
+            
+            allBounds.extend(pointLatLng);
+
+            // Draw matching colored radius circle if radius > 0
+            if (radius > 0) {
+              const circle = new L.Circle(pointLatLng, {
+                radius: radius,
+                color: color,
+                fillColor: color,
+                fillOpacity: 0.2,
+                weight: 2
+              }).addTo(window.markerLayer);
+              
+              allBounds.extend(circle.getBounds());
+            }
+
+            validCount++;
+          }
+        }
+      });
+
+      const banner = document.getElementById('info-banner');
+
+      if (validCount > 0) {
+        banner.textContent = `Showing ${validCount} location${validCount > 1 ? 's' : ''}`;
+        map.fitBounds(allBounds, { padding: new L.Point(50, 50), maxZoom: 16 });
+      } else {
+        banner.innerHTML = 'Append <code>#p=lat,lng,radius,color,Name</code> to URL.';
+      }
+    }
+
+    renderPoints();
+    window.addEventListener('hashchange', renderPoints);
+  </script>
+</body>
+</html>
