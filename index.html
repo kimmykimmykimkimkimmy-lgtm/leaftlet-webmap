@@ -2,12 +2,12 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>Leaflet 2.0 Map with Color & Radius</title>
+  <title>Leaflet 2.0 Map Viewer</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   
   <!-- Leaflet 2.0.0-beta.3 CSS -->
-     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" integrity="sha512-h9FcoyWjHcOcmEVkxOfTLnmZFWIH0iZhZT1H2TbOq55xssQGEJHEaIm+PgoUaZbRvQTNTluNOEfb1ZRy6D3BOw==" crossorigin="anonymous" referrerpolicy="no-referrer">
-
+   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" integrity="sha512-h9FcoyWjHcOcmEVkxOfTLnmZFWIH0iZhZT1H2TbOq55xssQGEJHEaIm+PgoUaZbRvQTNTluNOEfb1ZRy6D3BOw==" crossorigin="anonymous" referrerpolicy="no-referrer">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js" integrity="sha512-BwHfrr4c9kmRkLw6iXFdzcdWV/PGkVgiIyIWLLlTSXzWQzxuSg4DiQUCpauz/EWjgk5TYQqX/kvn9pG1NpYfqg==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
   
   <style>
     html, body, #map {
@@ -40,29 +40,27 @@
   <div id="info-banner">Loading points...</div>
   <div id="map"></div>
 
-  <!-- Leaflet 2.0.0-beta.3 Global JS -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js" integrity="sha512-BwHfrr4c9kmRkLw6iXFdzcdWV/PGkVgiIyIWLLlTSXzWQzxuSg4DiQUCpauz/EWjgk5TYQqX/kvn9pG1NpYfqg==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
-  
 
   <script>
     // 1. Initialize map
     const map = new L.Map('map').setView(new L.LatLng(22.2819, 114.1589), 13);
 
     // OpenStreetMap tile layer
-    new L.TileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+       new L.TileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       maxZoom: 19,
       attribution: '&copy; <a href="https://openstreetmap.org">OpenStreetMap</a> contributors'
     }).addTo(map);
 
     function escapeHTML(str) {
+      if (str === null || str === undefined) return '';
       const div = document.createElement('div');
-      div.textContent = str;
+      div.textContent = String(str);
       return div.innerHTML;
     }
 
     function parseColor(rawColor) {
       if (!rawColor) return '#3388ff';
-      const cleaned = rawColor.trim();
+      const cleaned = String(rawColor).trim();
       const candidate = /^[0-9a-fA-F]{3}$|^[0-9a-fA-F]{6}$/.test(cleaned) 
         ? `#${cleaned}` 
         : cleaned;
@@ -72,7 +70,6 @@
       return testEl.color !== '' ? candidate : '#3388ff';
     }
 
-    // Create a clean colored SVG map pin using DivIcon
     function createColoredIcon(color) {
       const svgPin = `
         <svg xmlns="http://w3.org" viewBox="0 0 24 36" width="28" height="42">
@@ -90,75 +87,91 @@
       });
     }
 
+    // Decode URL-Safe Base64 string into UTF-8 JSON object
+    function decodeBase64Url(base64Url) {
+      let base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+      // Restore missing '=' padding if stripped
+      while (base64.length % 4 !== 0) {
+        base64 += '=';
+      }
+      const binary = atob(base64);
+      const bytes = Uint8Array.from(binary, c => c.charCodeAt(0));
+      const jsonString = new TextDecoder().decode(bytes);
+      return JSON.parse(jsonString);
+    }
+
     function renderPoints() {
       if (window.markerLayer) {
         map.removeLayer(window.markerLayer);
       }
       window.markerLayer = new L.LayerGroup().addTo(map);
 
-      const rawHash = window.location.hash.substring(1);
-      const rawSearch = window.location.search.substring(1);
-      const paramString = rawHash.includes('p=') ? rawHash : rawSearch;
-      const params = new URLSearchParams(paramString);
-      
-      const points = params.getAll('p');
+      const rawHash = window.location.hash.substring(1).trim();
+      const banner = document.getElementById('info-banner');
+
+      if (!rawHash) {
+        banner.innerHTML = 'Append <code>#BASE64_DATA</code> to URL.';
+        return;
+      }
+
+      let spots = [];
+      try {
+        const decoded = decodeBase64Url(rawHash);
+        spots = Array.isArray(decoded) ? decoded : [decoded];
+      } catch (err) {
+        console.error('Base64 decode failed:', err);
+        banner.textContent = 'Error: Invalid Base64 data in URL.';
+        return;
+      }
+
       const allBounds = new L.LatLngBounds();
       let validCount = 0;
 
-      points.forEach((entry, index) => {
-        // Format: lat,lng,radius,color,label
-        const parts = entry.split(',');
-        if (parts.length >= 2) {
-          const lat = parseFloat((parts.at(0) || '').trim());
-          const lng = parseFloat((parts.at(1) || '').trim());
-          
-          // 3rd field: radius in meters
-          const radiusVal = parts.at(2) !== undefined ? parseFloat(parts.at(2).trim()) : 0;
-          const radius = !isNaN(radiusVal) && radiusVal > 0 ? radiusVal : 0;
+      spots.forEach((item, index) => {
+        // Support both short keys (a, o, r, c, n, g) and full column names
+        const lat = parseFloat(item.a ?? item.lat ?? item.latitude);
+        const lng = parseFloat(item.o ?? item.lng ?? item.longitude);
+        const radiusVal = parseFloat(item.r ?? item.radius ?? item.radius_meters ?? 0);
+        const radius = !isNaN(radiusVal) && radiusVal > 0 ? radiusVal : 0;
+        const color = parseColor(item.c ?? item.color ?? item.marker_color);
+        
+        const rawName = item.n ?? item.name ?? item.spot_name;
+        const label = rawName ? escapeHTML(rawName) : `Point ${index + 1}`;
+        
+        const rawRegion = item.g ?? item.region;
+        const regionText = rawRegion ? `<br>Region: ${escapeHTML(rawRegion)}` : '';
 
-          // 4th field: color
-          const color = parseColor(parts.at(3));
+        if (!isNaN(lat) && !isNaN(lng) && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180) {
+          const pointLatLng = new L.LatLng(lat, lng);
+          const radiusText = radius > 0 ? `<br>Radius: ${radius}m` : '';
 
-          // 5th+ field: label
-          const rawLabel = parts.slice(4).join(',').trim();
-          const label = rawLabel ? escapeHTML(rawLabel) : `Point ${index + 1}`;
+          new L.Marker(pointLatLng, { icon: createColoredIcon(color) })
+            .bindPopup(`<b>${label}</b>${regionText}${radiusText}<br><small>${lat.toFixed(5)}, ${lng.toFixed(5)}</small>`)
+            .addTo(window.markerLayer);
 
-          if (!isNaN(lat) && !isNaN(lng) && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180) {
-            const pointLatLng = new L.LatLng(lat, lng);
-            const radiusText = radius > 0 ? `<br>Radius: ${radius}m` : '';
-            
-            // Add colored SVG pin marker
-            new L.Marker(pointLatLng, { icon: createColoredIcon(color) })
-              .bindPopup(`<b>${label}</b>${radiusText}<br><small>${lat.toFixed(5)}, ${lng.toFixed(5)}</small>`)
-              .addTo(window.markerLayer);
-            
-            allBounds.extend(pointLatLng);
+          allBounds.extend(pointLatLng);
 
-            // Draw matching colored radius circle if radius > 0
-            if (radius > 0) {
-              const circle = new L.Circle(pointLatLng, {
-                radius: radius,
-                color: color,
-                fillColor: color,
-                fillOpacity: 0.2,
-                weight: 2
-              }).addTo(window.markerLayer);
-              
-              allBounds.extend(circle.getBounds());
-            }
+          if (radius > 0) {
+            const circle = new L.Circle(pointLatLng, {
+              radius: radius,
+              color: color,
+              fillColor: color,
+              fillOpacity: 0.2,
+              weight: 2
+            }).addTo(window.markerLayer);
 
-            validCount++;
+            allBounds.extend(circle.getBounds());
           }
+
+          validCount++;
         }
       });
-
-      const banner = document.getElementById('info-banner');
 
       if (validCount > 0) {
         banner.textContent = `Showing ${validCount} location${validCount > 1 ? 's' : ''}`;
         map.fitBounds(allBounds, { padding: new L.Point(50, 50), maxZoom: 16 });
       } else {
-        banner.innerHTML = 'Append <code>#p=lat,lng,radius,color,Name</code> to URL.';
+        banner.textContent = 'No valid coordinates found in decoded data.';
       }
     }
 
