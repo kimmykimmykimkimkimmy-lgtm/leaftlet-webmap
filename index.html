@@ -117,7 +117,7 @@
 
       entries.forEach((entry, index) => {
         // Split fields by '|': lat|lng|radius|color|spot_name|region
-        const parts = entry.split('|');
+        const parts = entry.split(',');
         if (parts.length >= 2) {
           const lat = parseFloat((parts.at(0) || '').trim());
           const lng = parseFloat((parts.at(1) || '').trim());
